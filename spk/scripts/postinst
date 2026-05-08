@@ -1,0 +1,28 @@
+#!/bin/sh
+
+PKG_DIR="${SYNOPKG_PKGDEST:-/var/packages/${SYNOPKG_PKGNAME}/target}"
+VAR_DIR="${PKG_DIR}/var"
+PORT_FILE="${VAR_DIR}/port"
+PASSWORD_FILE="${VAR_DIR}/admin_password"
+
+mkdir -p "${VAR_DIR}"
+
+PORT_VALUE="$(echo "${WIZARD_SERVICE_PORT:-}" | tr -d ' \t\r\n')"
+if [ -n "${PORT_VALUE}" ]; then
+  case "${PORT_VALUE}" in
+    ''|*[!0-9]*)
+      ;;
+    *)
+      if [ "${PORT_VALUE}" -ge 1 ] && [ "${PORT_VALUE}" -le 65535 ]; then
+        echo "${PORT_VALUE}" > "${PORT_FILE}"
+      fi
+      ;;
+  esac
+fi
+
+if [ -n "${WIZARD_ADMIN_PASSWORD:-}" ]; then
+  printf '%s' "${WIZARD_ADMIN_PASSWORD}" > "${PASSWORD_FILE}"
+  chmod 600 "${PASSWORD_FILE}"
+fi
+
+exit 0

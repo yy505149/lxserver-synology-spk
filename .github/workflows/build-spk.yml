@@ -1,0 +1,107 @@
+name: Build SPK
+
+on:
+  workflow_dispatch:
+    inputs:
+      lxserver_repo:
+        description: "lxserver Git repository URL"
+        required: false
+        default: "https://github.com/XCQ0607/lxserver.git"
+      lxserver_ref:
+        description: "lxserver branch/tag/commit"
+        required: false
+        default: "main"
+      spk_version_override:
+        description: "Optional SPK version override"
+        required: false
+        default: ""
+      publish_release:
+        description: "Publish GitHub Release"
+        required: false
+        default: "true"
+      release_tag:
+        description: "Release tag (optional, auto if empty)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+
+    steps:
+      - name: Checkout packaging repo
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build SPK in target platform container
+        run: |
+          docker run --rm \
+            --platform "${{ matrix.platform }}" \
+            -e LXSERVER_REPO="${{ github.event.inputs.lxserver_repo || 'https://github.com/XCQ0607/lxserver.git' }}" \
+            -e LXSERVER_REF="${{ github.event.inputs.lxserver_ref || 'main' }}" \
+            -e SPK_VERSION_OVERRIDE="${{ github.event.inputs.spk_version_override }}" \
+            -e TARGET_ARCH_TAG="${{ matrix.arch }}" \
+            -v "${{ github.workspace }}:/work" \
+            -w /work \
+            node:20-bookworm bash -lc '
+              apt-get update &&
+              apt-get install -y --no-install-recommends git ca-certificates tar perl &&
+              chmod +x ./build-spk.sh &&
+              ./build-spk.sh
+            '
+
+      - name: Upload SPK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: spk-${{ matrix.arch }}
+          path: dist/spk/*.spk
+
+  release:
+    name: Publish Release
+    runs-on: ubuntu-24.04
+    needs: build
+    if: ${{ github.event.inputs.publish_release != 'false' }}
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: spk-*
+          merge-multiple: true
+
+      - name: Resolve release tag
+        id: rel
+        run: |
+          if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            echo "tag=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            spk_file="$(ls release-assets/*.spk | head -n 1)"
+            spk_base="$(basename "${spk_file}")"
+            version="$(echo "${spk_base}" | sed -E 's/^lxserver-([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
+            if [ -z "${version}" ] || [ "${version}" = "${spk_base}" ]; then
+              echo "无法从产物文件名解析版本号: ${spk_base}" >&2
+              exit 1
+            fi
+            echo "tag=lxserver-v${version}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.rel.outputs.tag }}
+          name: ${{ steps.rel.outputs.tag }}
+          files: release-assets/*.spk
