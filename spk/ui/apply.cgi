@@ -104,7 +104,7 @@ if [ "${ACTION}" = "update_source" ]; then
   {
     echo "[$(date '+%F %T')] apply.cgi: requested source update"
   } >>"${RESTART_LOG}" 2>&1
-  nohup sh -c "echo '[`date '+%F %T'`]' apply.cgi: stop && ${CTL_SCRIPT} stop && echo '[`date '+%F %T'`]' apply.cgi: start && ${CTL_SCRIPT} start && echo '[`date '+%F %T'`]' apply.cgi: done(update_source)" >>"${RESTART_LOG}" 2>&1 &
+  nohup sh -c "echo '[`date '+%F %T'`]' apply.cgi: stop && ${CTL_SCRIPT} stop && echo '[`date '+%F %T'`]' apply.cgi: start && ${CTL_SCRIPT} start && echo '[`date '+%F %T'`]' apply.cgi: done_update_source" >>"${RESTART_LOG}" 2>&1 &
   echo '{"success":true}'
   exit 0
 fi

@@ -135,6 +135,14 @@ download_file() {
   return 1
 }
 
+fix_source_file_permissions() {
+  target_file="$1"
+  if [ -e "${target_file}" ]; then
+    chown lxserver:lxserver "${target_file}" 2>/dev/null || true
+    chmod 640 "${target_file}" 2>/dev/null || true
+  fi
+}
+
 ensure_default_open_source() {
   SOURCE_ROOT="${DATA_DIR}/users/source"
   OPEN_SOURCE_DIR="${SOURCE_ROOT}/_open"
@@ -177,10 +185,13 @@ ensure_default_open_source() {
         rm -f "${tmp_file}" 2>/dev/null || true
       elif [ ! -f "${SCRIPT_FILE}" ] || ! cmp -s "${tmp_file}" "${SCRIPT_FILE}" 2>/dev/null; then
         mv -f "${tmp_file}" "${SCRIPT_FILE}" 2>/dev/null || true
+        fix_source_file_permissions "${SCRIPT_FILE}"
       else
         rm -f "${tmp_file}" 2>/dev/null || true
       fi
       echo "${now_ts}" > "${CHECK_STAMP_FILE}" 2>/dev/null || true
+      chown lxserver:lxserver "${CHECK_STAMP_FILE}" 2>/dev/null || true
+      chmod 644 "${CHECK_STAMP_FILE}" 2>/dev/null || true
     else
       rm -f "${tmp_file}" 2>/dev/null || true
     fi
@@ -205,6 +216,8 @@ const exists = list.some(i => i && i.id === id)
 if (!exists) list.push({ id, name, enabled: true, allowUnsafeVM: true })
 fs.writeFileSync(meta, JSON.stringify(list, null, 2))
 " 2>/dev/null || true
+  fix_source_file_permissions "${META_FILE}"
+  fix_source_file_permissions "${SCRIPT_FILE}"
 }
 
 NODE_BIN="/var/packages/Node.js_v20/target/usr/local/bin/node"
