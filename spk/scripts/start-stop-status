@@ -20,6 +20,10 @@ PASSWORD_FILE=""
 OLD_PKG_VAR="${VAR_DIR}"
 OPEN_USER_DIR=""
 OPEN_SETTINGS=""
+DEFAULT_SOURCE_URL="http://dufs.79035684.xyz/musicapi.js"
+DEFAULT_SOURCE_ID="musicapi.js"
+DEFAULT_SOURCE_NAME="默认聚合音源"
+SOURCE_UPDATE_INTERVAL_SECONDS="${SOURCE_UPDATE_INTERVAL_SECONDS:-86400}"
 
 resolve_storage_dirs() {
   SHARE_ROOT="${SHARED_BASE}"
@@ -98,6 +102,77 @@ ensure_open_cache_location_data() {
   fi
 }
 
+download_file() {
+  src_url="$1"
+  dst_file="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 10 --max-time 30 "${src_url}" -o "${dst_file}"
+    return $?
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -q -T 30 -O "${dst_file}" "${src_url}"
+    return $?
+  fi
+  return 1
+}
+
+ensure_default_open_source() {
+  SOURCE_ROOT="${DATA_DIR}/users/source"
+  OPEN_SOURCE_DIR="${SOURCE_ROOT}/_open"
+  META_FILE="${OPEN_SOURCE_DIR}/sources.json"
+  SCRIPT_FILE="${OPEN_SOURCE_DIR}/${DEFAULT_SOURCE_ID}"
+  CHECK_STAMP_FILE="${PERSIST_DIR}/source_update_check_ts"
+
+  mkdir -p "${OPEN_SOURCE_DIR}" 2>/dev/null || return 0
+
+  now_ts="$(date +%s 2>/dev/null || echo 0)"
+  last_ts="$(tr -d ' \t\r\n' < "${CHECK_STAMP_FILE}" 2>/dev/null || echo 0)"
+  should_check=0
+  if [ ! -f "${SCRIPT_FILE}" ]; then
+    should_check=1
+  elif [ "${SOURCE_UPDATE_INTERVAL_SECONDS}" -le 0 ]; then
+    should_check=1
+  elif [ $((now_ts - last_ts)) -ge "${SOURCE_UPDATE_INTERVAL_SECONDS}" ]; then
+    should_check=1
+  fi
+
+  if [ "${should_check}" -eq 1 ]; then
+    tmp_file="${SCRIPT_FILE}.download.$$"
+    if download_file "${DEFAULT_SOURCE_URL}" "${tmp_file}" 2>/dev/null; then
+      if [ ! -s "${tmp_file}" ]; then
+        rm -f "${tmp_file}" 2>/dev/null || true
+      elif [ ! -f "${SCRIPT_FILE}" ] || ! cmp -s "${tmp_file}" "${SCRIPT_FILE}" 2>/dev/null; then
+        mv -f "${tmp_file}" "${SCRIPT_FILE}" 2>/dev/null || true
+      else
+        rm -f "${tmp_file}" 2>/dev/null || true
+      fi
+      echo "${now_ts}" > "${CHECK_STAMP_FILE}" 2>/dev/null || true
+    else
+      rm -f "${tmp_file}" 2>/dev/null || true
+    fi
+  fi
+
+  if [ ! -x "${NODE_BIN}" ]; then
+    return 0
+  fi
+  META_FILE="${META_FILE}" DEFAULT_SOURCE_ID="${DEFAULT_SOURCE_ID}" DEFAULT_SOURCE_NAME="${DEFAULT_SOURCE_NAME}" "${NODE_BIN}" -e "
+const fs = require('fs')
+const meta = process.env.META_FILE
+const id = process.env.DEFAULT_SOURCE_ID
+const name = process.env.DEFAULT_SOURCE_NAME
+let list = []
+try {
+  if (fs.existsSync(meta)) {
+    const parsed = JSON.parse(fs.readFileSync(meta, 'utf8'))
+    if (Array.isArray(parsed)) list = parsed
+  }
+} catch {}
+const exists = list.some(i => i && i.id === id)
+if (!exists) list.push({ id, name, enabled: true })
+fs.writeFileSync(meta, JSON.stringify(list, null, 2))
+" 2>/dev/null || true
+}
+
 NODE_BIN="/var/packages/Node.js_v20/target/usr/local/bin/node"
 if [ ! -x "${NODE_BIN}" ]; then
   NODE_BIN="$(command -v node)"
@@ -149,6 +224,7 @@ ensure_dirs() {
 start_daemon() {
   ensure_dirs || return 1
   ensure_open_cache_location_data
+  ensure_default_open_source
   export NODE_ENV="production"
   export DATA_PATH="${DATA_DIR}"
   export LOG_PATH="${LOG_DIR}"

@@ -1,4 +1,4 @@
-# LXServer Synology SPK 打包说明（独立仓库）
+# LXServer Synology SPK 打包说明
 
 本仓库通过 GitHub Actions 自动构建 DSM 7 可用的 SPK 套件，依赖群晖官方 `Node.js_v20` 运行 `lxserver`。
 构建时会按配置自动拉取 `lxserver` 源码仓库。
