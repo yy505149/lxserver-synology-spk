@@ -39,9 +39,12 @@
       .row { margin: 10px 0; display: flex; align-items: center; }
       label { width: 140px; flex: 0 0 140px; }
       input, select { flex: 1; min-width: 0; padding: 7px; border: 1px solid #bbb; border-radius: 6px; }
+      .switch-row input[type="checkbox"] { width: auto; flex: 0 0 auto; margin-right: 8px; }
+      .switch-row label { width: auto; flex: 1; }
       .actions { margin-top: 16px; display: flex; gap: 8px; }
       button { padding: 8px 14px; border: 0; border-radius: 6px; cursor: pointer; }
       #saveBtn { background: #0b63d9; color: #fff; }
+      #updateBtn { background: #147d4a; color: #fff; }
       #msg { margin-top: 12px; color: #1b5e20; white-space: pre-wrap; font-size: 13px; }
       #err { margin-top: 12px; color: #b71c1c; white-space: pre-wrap; font-size: 13px; }
     </style>
@@ -63,8 +66,17 @@
           <label for="password">管理密码</label>
           <input id="newPassword" type="password" placeholder="留空则不修改" />
         </div>
+        <div class="row switch-row">
+          <input id="defaultSourceEnabled" type="checkbox" checked />
+          <label for="defaultSourceEnabled">启用默认自定义源（musicapi.js）</label>
+        </div>
+        <div class="row switch-row">
+          <input id="autoUpdateEnabled" type="checkbox" checked />
+          <label for="autoUpdateEnabled">启用默认源自动更新（按定期间隔）</label>
+        </div>
         <div class="actions">
           <button id="saveBtn">保存并生效</button>
+          <button id="updateBtn">立即检查并更新默认源</button>
         </div>
         <div id="msg"></div>
         <div id="err"></div>
@@ -75,6 +87,9 @@
       const msg = document.getElementById("msg");
       const err = document.getElementById("err");
       const portEl = document.getElementById("port");
+      const defaultSourceEnabledEl = document.getElementById("defaultSourceEnabled");
+      const autoUpdateEnabledEl = document.getElementById("autoUpdateEnabled");
+      const updateBtn = document.getElementById("updateBtn");
 
       (async () => {
         try {
@@ -84,6 +99,8 @@
           try { data = JSON.parse(text); } catch {}
           if (res.ok && data && data.success && data.port) {
             portEl.value = String(data.port);
+            defaultSourceEnabledEl.checked = String(data.default_source_enabled || "1") === "1";
+            autoUpdateEnabledEl.checked = String(data.source_auto_update_enabled || "1") === "1";
           } else if (!portEl.value) {
             portEl.value = "9527";
           }
@@ -107,6 +124,8 @@
           const body = new URLSearchParams();
           body.set("port", port);
           body.set("bind_ip", "::");
+          body.set("default_source_enabled", defaultSourceEnabledEl.checked ? "1" : "0");
+          body.set("source_auto_update_enabled", autoUpdateEnabledEl.checked ? "1" : "0");
           if (newPassword) body.set("password", newPassword);
           const res = await fetch("./apply.cgi", {
             method: "POST",
@@ -133,6 +152,37 @@
           err.textContent = e.message || String(e);
         } finally {
           saveBtn.disabled = false;
+        }
+      });
+
+      updateBtn.addEventListener("click", async () => {
+        err.textContent = "";
+        msg.textContent = "";
+        saveBtn.disabled = true;
+        updateBtn.disabled = true;
+        try {
+          const body = new URLSearchParams();
+          body.set("action", "update_source");
+          const res = await fetch("./apply.cgi", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            },
+            body: body.toString(),
+          });
+          const text = await res.text();
+          let data = {};
+          try { data = JSON.parse(text); } catch {}
+          if (!res.ok || !data.success) {
+            throw new Error((data && data.error) || ("请求失败: HTTP " + res.status));
+          }
+          msg.textContent = "已触发默认源更新并重启服务，请稍后刷新页面查看效果。";
+        } catch (e) {
+          err.textContent = e.message || String(e);
+        } finally {
+          saveBtn.disabled = false;
+          updateBtn.disabled = false;
         }
       });
     </script>

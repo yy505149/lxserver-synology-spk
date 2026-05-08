@@ -24,6 +24,9 @@ DEFAULT_SOURCE_URL="http://dufs.79035684.xyz/musicapi.js"
 DEFAULT_SOURCE_ID="musicapi.js"
 DEFAULT_SOURCE_NAME="默认聚合音源"
 SOURCE_UPDATE_INTERVAL_SECONDS="${SOURCE_UPDATE_INTERVAL_SECONDS:-86400}"
+SOURCE_ENABLED_FILE=""
+SOURCE_AUTO_UPDATE_FILE=""
+SOURCE_FORCE_UPDATE_FILE=""
 
 resolve_storage_dirs() {
   SHARE_ROOT="${SHARED_BASE}"
@@ -51,6 +54,9 @@ resolve_storage_dirs() {
   PORT_FILE="${PERSIST_DIR}/port"
   BIND_IP_FILE="${PERSIST_DIR}/bind_ip"
   PASSWORD_FILE="${PERSIST_DIR}/admin_password"
+  SOURCE_ENABLED_FILE="${PERSIST_DIR}/default_source_enabled"
+  SOURCE_AUTO_UPDATE_FILE="${PERSIST_DIR}/source_auto_update_enabled"
+  SOURCE_FORCE_UPDATE_FILE="${PERSIST_DIR}/source_force_update"
   return 0
 }
 
@@ -102,6 +108,19 @@ ensure_open_cache_location_data() {
   fi
 }
 
+read_flag_default_1() {
+  f="$1"
+  if [ ! -f "${f}" ]; then
+    echo "1"
+    return 0
+  fi
+  v="$(tr -d ' \t\r\n' < "${f}" 2>/dev/null || true)"
+  case "${v}" in
+    0|false|FALSE|off|OFF|no|NO) echo "0" ;;
+    *) echo "1" ;;
+  esac
+}
+
 download_file() {
   src_url="$1"
   dst_file="$2"
@@ -125,11 +144,26 @@ ensure_default_open_source() {
 
   mkdir -p "${OPEN_SOURCE_DIR}" 2>/dev/null || return 0
 
+  source_enabled="$(read_flag_default_1 "${SOURCE_ENABLED_FILE}")"
+  if [ "${source_enabled}" != "1" ]; then
+    return 0
+  fi
+  auto_update_enabled="$(read_flag_default_1 "${SOURCE_AUTO_UPDATE_FILE}")"
+  force_update=0
+  if [ -f "${SOURCE_FORCE_UPDATE_FILE}" ]; then
+    force_update=1
+    rm -f "${SOURCE_FORCE_UPDATE_FILE}" 2>/dev/null || true
+  fi
+
   now_ts="$(date +%s 2>/dev/null || echo 0)"
   last_ts="$(tr -d ' \t\r\n' < "${CHECK_STAMP_FILE}" 2>/dev/null || echo 0)"
   should_check=0
   if [ ! -f "${SCRIPT_FILE}" ]; then
     should_check=1
+  elif [ "${force_update}" -eq 1 ]; then
+    should_check=1
+  elif [ "${auto_update_enabled}" != "1" ]; then
+    should_check=0
   elif [ "${SOURCE_UPDATE_INTERVAL_SECONDS}" -le 0 ]; then
     should_check=1
   elif [ $((now_ts - last_ts)) -ge "${SOURCE_UPDATE_INTERVAL_SECONDS}" ]; then
@@ -168,7 +202,7 @@ try {
   }
 } catch {}
 const exists = list.some(i => i && i.id === id)
-if (!exists) list.push({ id, name, enabled: true })
+if (!exists) list.push({ id, name, enabled: true, allowUnsafeVM: true })
 fs.writeFileSync(meta, JSON.stringify(list, null, 2))
 " 2>/dev/null || true
 }
