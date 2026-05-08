@@ -11,11 +11,13 @@ CACHE_DIR="${VAR_DIR}/cache"
 MUSIC_DIR="${VAR_DIR}/music"
 SHARES_DIR="/var/packages/${SYNOPKG_PKGNAME}/shares"
 SHARED_BASE="${SHARES_DIR}/lxserver"
-PORT_FILE="${VAR_DIR}/port"
+PERSIST_SUBDIR="synology-pkg-var"
 PORT_DEFAULT="9527"
-BIND_IP_FILE="${VAR_DIR}/bind_ip"
 BIND_IP_DEFAULT="::"
-PASSWORD_FILE="${VAR_DIR}/admin_password"
+PORT_FILE=""
+BIND_IP_FILE=""
+PASSWORD_FILE=""
+OLD_PKG_VAR="${VAR_DIR}"
 OPEN_USER_DIR=""
 OPEN_SETTINGS=""
 
@@ -41,6 +43,10 @@ resolve_storage_dirs() {
   CACHE_DIR="${SHARE_ROOT}/cache"
   MUSIC_DIR="${SHARE_ROOT}/music"
   LOG_DIR="${SHARE_ROOT}/logs"
+  PERSIST_DIR="${SHARE_ROOT}/${PERSIST_SUBDIR}"
+  PORT_FILE="${PERSIST_DIR}/port"
+  BIND_IP_FILE="${PERSIST_DIR}/bind_ip"
+  PASSWORD_FILE="${PERSIST_DIR}/admin_password"
   return 0
 }
 
@@ -125,6 +131,13 @@ ensure_dirs() {
     ln -s "${MUSIC_DIR}" "${APP_DIR}/music" 2>/dev/null || true
   fi
   mkdir -p "${RUN_DIR}"
+  mkdir -p "${PERSIST_DIR}" || true
+  # 从旧版 target/var 迁移一次（升级前写在套件目录内的配置）
+  for f in port admin_password bind_ip; do
+    if [ ! -f "${PERSIST_DIR}/${f}" ] && [ -f "${OLD_PKG_VAR}/${f}" ]; then
+      cp -a "${OLD_PKG_VAR}/${f}" "${PERSIST_DIR}/${f}" 2>/dev/null || true
+    fi
+  done
   if [ ! -f "${PORT_FILE}" ]; then
     echo "${PORT_DEFAULT}" > "${PORT_FILE}"
   fi

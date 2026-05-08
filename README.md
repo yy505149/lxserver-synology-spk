@@ -66,29 +66,37 @@ DSM 7 下该共享目录会映射为：`/var/packages/lxserver/shares/lxserver`
 - `/var/packages/lxserver/shares/lxserver/cache`
 - `/var/packages/lxserver/shares/lxserver/music`
 
+**端口与管理密码**（升级后会保留）：为避免 DSM 升级替换 `target/var`，向导写入的端口与 `FRONTEND_PASSWORD` 对应文件存放在共享目录下：
+
+- `/var/packages/lxserver/shares/lxserver/synology-pkg-var/port`
+- `/var/packages/lxserver/shares/lxserver/synology-pkg-var/bind_ip`
+- `/var/packages/lxserver/shares/lxserver/synology-pkg-var/admin_password`
+
+首次启动时若发现旧版仍在 `target/var` 下的上述文件，会自动复制到上述目录。
+
 ## 端口配置
 
-- 默认端口为 `9527`，端口号保存在：`/var/packages/lxserver/target/var/port`
-- 默认监听地址为 `::`（优先兼容 IPv6），地址保存在：`/var/packages/lxserver/target/var/bind_ip`
-- 安装向导会提示填写“服务端口”和“管理密码”；若留空，则使用默认值（端口 `9527`，管理密码 `123456`）
+- 默认端口为 `9527`，持久化路径见上文 `synology-pkg-var/port`
+- 默认监听地址为 `::`（优先兼容 IPv6），持久化路径见上文 `synology-pkg-var/bind_ip`
+- 安装向导会提示填写“服务端口”和“管理密码”；若留空，则使用默认值（端口 `9527`，管理密码 `123456`）。**仅首次安装**会根据向导写入；套件升级不会用向导再次覆盖已有端口与密码。
 - 已提供简体中文安装向导文件：`WIZARD_UIFILES/install_uifile_chs`
 - 修改端口后重启套件生效：
 
 ```bash
-echo 9527 > /var/packages/lxserver/target/var/port
+echo 9527 > /var/packages/lxserver/shares/lxserver/synology-pkg-var/port
 synopkg restart lxserver
 ```
 
 - 如需只监听 IPv4，可改为：
 
 ```bash
-echo 0.0.0.0 > /var/packages/lxserver/target/var/bind_ip
+echo 0.0.0.0 > /var/packages/lxserver/shares/lxserver/synology-pkg-var/bind_ip
 synopkg restart lxserver
 ```
 
 ## 管理密码
 
-- 安装向导填写的管理密码会写入：`/var/packages/lxserver/target/var/admin_password`
+- 安装向导填写的管理密码会写入共享目录下的 `synology-pkg-var/admin_password`（见「数据目录」一节）
 - 运行时会自动作为 `FRONTEND_PASSWORD` 注入服务进程
 - 若未填写该项，则沿用项目默认密码 `123456`
 

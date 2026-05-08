@@ -2,27 +2,68 @@
 
 PKG_DIR="${SYNOPKG_PKGDEST:-/var/packages/${SYNOPKG_PKGNAME}/target}"
 VAR_DIR="${PKG_DIR}/var"
-PORT_FILE="${VAR_DIR}/port"
-PASSWORD_FILE="${VAR_DIR}/admin_password"
+SHARES_DIR="/var/packages/${SYNOPKG_PKGNAME}/shares"
+SHARED_BASE="${SHARES_DIR}/lxserver"
+PERSIST_SUBDIR="synology-pkg-var"
 
-mkdir -p "${VAR_DIR}"
+resolve_share_root() {
+  SHARE_ROOT="${SHARED_BASE}"
+  if [ ! -d "${SHARE_ROOT}" ]; then
+    for v in /volume*; do
+      [ -d "${v}" ] || continue
+      case "${v}" in
+        /volume[0-9]*)
+          if [ -d "${v}/lxserver" ]; then
+            SHARE_ROOT="${v}/lxserver"
+            break
+          fi
+          ;;
+      esac
+    done
+  fi
+  if [ ! -d "${SHARE_ROOT}" ]; then
+    return 1
+  fi
+  printf '%s' "${SHARE_ROOT}"
+  return 0
+}
 
-PORT_VALUE="$(echo "${WIZARD_SERVICE_PORT:-}" | tr -d ' \t\r\n')"
-if [ -n "${PORT_VALUE}" ]; then
-  case "${PORT_VALUE}" in
-    ''|*[!0-9]*)
-      ;;
-    *)
-      if [ "${PORT_VALUE}" -ge 1 ] && [ "${PORT_VALUE}" -le 65535 ]; then
-        echo "${PORT_VALUE}" > "${PORT_FILE}"
-      fi
-      ;;
-  esac
+PERSIST_DIR=""
+if sr="$(resolve_share_root)"; then
+  PERSIST_DIR="${sr}/${PERSIST_SUBDIR}"
+fi
+if [ -z "${PERSIST_DIR}" ]; then
+  PERSIST_DIR="${VAR_DIR}"
 fi
 
-if [ -n "${WIZARD_ADMIN_PASSWORD:-}" ]; then
-  printf '%s' "${WIZARD_ADMIN_PASSWORD}" > "${PASSWORD_FILE}"
-  chmod 600 "${PASSWORD_FILE}"
-fi
+mkdir -p "${PERSIST_DIR}"
+
+PORT_FILE="${PERSIST_DIR}/port"
+PASSWORD_FILE="${PERSIST_DIR}/admin_password"
+
+# 仅在首次安装时写入向导值；升级不应覆盖用户已有端口与密码。
+case "${SYNOPKG_PKG_STATUS:-}" in
+  install)
+    PORT_VALUE="$(echo "${WIZARD_SERVICE_PORT:-}" | tr -d ' \t\r\n')"
+    if [ -n "${PORT_VALUE}" ]; then
+      case "${PORT_VALUE}" in
+        ''|*[!0-9]*)
+          ;;
+        *)
+          if [ "${PORT_VALUE}" -ge 1 ] && [ "${PORT_VALUE}" -le 65535 ]; then
+            echo "${PORT_VALUE}" > "${PORT_FILE}"
+          fi
+          ;;
+      esac
+    fi
+
+    if [ -n "${WIZARD_ADMIN_PASSWORD:-}" ]; then
+      printf '%s' "${WIZARD_ADMIN_PASSWORD}" > "${PASSWORD_FILE}"
+      chmod 600 "${PASSWORD_FILE}"
+    fi
+    ;;
+  *)
+    ;;
+esac
 
 exit 0
