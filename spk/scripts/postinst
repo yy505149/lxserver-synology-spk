@@ -41,9 +41,11 @@ mkdir -p "${PERSIST_DIR}"
 PORT_FILE="${PERSIST_DIR}/port"
 PASSWORD_FILE="${PERSIST_DIR}/admin_password"
 
-# 仅在首次安装时写入向导值；升级不应覆盖用户已有端口与密码。
+# 升级时不覆盖已有端口与密码；安装/重装时允许写入向导值。
 case "${SYNOPKG_PKG_STATUS:-}" in
-  install)
+  upgrade|UPGRADE)
+    ;;
+  *)
     PORT_VALUE="$(echo "${WIZARD_SERVICE_PORT:-}" | tr -d ' \t\r\n')"
     if [ -n "${PORT_VALUE}" ]; then
       case "${PORT_VALUE}" in
@@ -61,8 +63,6 @@ case "${SYNOPKG_PKG_STATUS:-}" in
       printf '%s' "${WIZARD_ADMIN_PASSWORD}" > "${PASSWORD_FILE}"
       chmod 600 "${PASSWORD_FILE}"
     fi
-    ;;
-  *)
     ;;
 esac
 
