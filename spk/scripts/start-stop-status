@@ -24,9 +24,13 @@ DEFAULT_SOURCE_URL="https://ghproxy.net/raw.githubusercontent.com/pdone/lx-music
 DEFAULT_SOURCE_ID="musicapi.js"
 DEFAULT_SOURCE_NAME="默认聚合音源"
 SOURCE_UPDATE_INTERVAL_SECONDS="${SOURCE_UPDATE_INTERVAL_SECONDS:-86400}"
+SOURCE_TIMER_TICK_SECONDS="${SOURCE_TIMER_TICK_SECONDS:-3600}"
 SOURCE_ENABLED_FILE=""
 SOURCE_AUTO_UPDATE_FILE=""
 SOURCE_FORCE_UPDATE_FILE=""
+SOURCE_TIMER_PID_FILE="${RUN_DIR}/source_timer.pid"
+SOURCE_UPDATE_LOG="${LOG_DIR}/source-update.log"
+SOURCE_CHANGED=0
 
 resolve_storage_dirs() {
   SHARE_ROOT="${SHARED_BASE}"
@@ -57,6 +61,7 @@ resolve_storage_dirs() {
   SOURCE_ENABLED_FILE="${PERSIST_DIR}/default_source_enabled"
   SOURCE_AUTO_UPDATE_FILE="${PERSIST_DIR}/source_auto_update_enabled"
   SOURCE_FORCE_UPDATE_FILE="${PERSIST_DIR}/source_force_update"
+  SOURCE_UPDATE_LOG="${LOG_DIR}/source-update.log"
   return 0
 }
 
@@ -143,18 +148,19 @@ fix_source_file_permissions() {
   fi
 }
 
-ensure_default_open_source() {
+update_default_source_script() {
   SOURCE_ROOT="${DATA_DIR}/users/source"
   OPEN_SOURCE_DIR="${SOURCE_ROOT}/_open"
   META_FILE="${OPEN_SOURCE_DIR}/sources.json"
   SCRIPT_FILE="${OPEN_SOURCE_DIR}/${DEFAULT_SOURCE_ID}"
   CHECK_STAMP_FILE="${PERSIST_DIR}/source_update_check_ts"
+  SOURCE_CHANGED=0
 
   mkdir -p "${OPEN_SOURCE_DIR}" 2>/dev/null || return 0
 
   source_enabled="$(read_flag_default_1 "${SOURCE_ENABLED_FILE}")"
   if [ "${source_enabled}" != "1" ]; then
-    return 0
+    return 1
   fi
   auto_update_enabled="$(read_flag_default_1 "${SOURCE_AUTO_UPDATE_FILE}")"
   force_update=0
@@ -164,7 +170,7 @@ ensure_default_open_source() {
   fi
 
   now_ts="$(date +%s 2>/dev/null || echo 0)"
-  last_ts="$(tr -d ' \t\r\n' < "${CHECK_STAMP_FILE}" 2>/dev/null || echo 0)"
+  last_ts="$(tr -d ' \t\r\n' 2>/dev/null < "${CHECK_STAMP_FILE}" || echo 0)"
   should_check=0
   if [ ! -f "${SCRIPT_FILE}" ]; then
     should_check=1
@@ -186,6 +192,7 @@ ensure_default_open_source() {
       elif [ ! -f "${SCRIPT_FILE}" ] || ! cmp -s "${tmp_file}" "${SCRIPT_FILE}" 2>/dev/null; then
         mv -f "${tmp_file}" "${SCRIPT_FILE}" 2>/dev/null || true
         fix_source_file_permissions "${SCRIPT_FILE}"
+        SOURCE_CHANGED=1
       else
         rm -f "${tmp_file}" 2>/dev/null || true
       fi
@@ -196,7 +203,10 @@ ensure_default_open_source() {
       rm -f "${tmp_file}" 2>/dev/null || true
     fi
   fi
+  return 0
+}
 
+register_default_source_meta() {
   if [ ! -x "${NODE_BIN}" ]; then
     return 0
   fi
@@ -218,6 +228,35 @@ fs.writeFileSync(meta, JSON.stringify(list, null, 2))
 " 2>/dev/null || true
   fix_source_file_permissions "${META_FILE}"
   fix_source_file_permissions "${SCRIPT_FILE}"
+}
+
+ensure_default_open_source() {
+  update_default_source_script || return 0
+  register_default_source_meta
+}
+
+source_restart_service() {
+  CTL_SCRIPT="/var/packages/${SYNOPKG_PKGNAME:-lxserver}/scripts/start-stop-status"
+  {
+    echo "[$(date '+%F %T')] source-timer: default source content changed, restarting service"
+  } >> "${SOURCE_UPDATE_LOG}" 2>/dev/null || true
+  nohup env SYNOPKG_PKGNAME="${SYNOPKG_PKGNAME:-lxserver}" SYNOPKG_PKGDEST="${PKG_DIR}" \
+    sh -c "'${CTL_SCRIPT}' stop && '${CTL_SCRIPT}' start" >> "${SOURCE_UPDATE_LOG}" 2>&1 &
+}
+
+source_timer_loop() {
+  while :; do
+    sleep "${SOURCE_TIMER_TICK_SECONDS}"
+    # stop 时会删除 pid 文件，定时器据此退出
+    [ -f "${SOURCE_TIMER_PID_FILE}" ] || exit 0
+    # 手动强更标记正等待重启流程消费，跳过本轮避免双重重启
+    [ -f "${SOURCE_FORCE_UPDATE_FILE}" ] && continue
+    update_default_source_script || continue
+    if [ "${SOURCE_CHANGED}" = "1" ]; then
+      source_restart_service
+      exit 0
+    fi
+  done
 }
 
 NODE_BIN="/var/packages/Node.js_v20/target/usr/local/bin/node"
@@ -299,9 +338,26 @@ start_daemon() {
   cd "${APP_DIR}" || exit 1
   "${NODE_BIN}" index.js >> "${LOG_DIR}/stdout.log" 2>> "${LOG_DIR}/stderr.log" &
   echo $! > "${PID_FILE}"
+  # 清理残留的旧定时器（如 node 异常退出后未被 stop 收割），避免重复启动
+  if [ -f "${SOURCE_TIMER_PID_FILE}" ]; then
+    old_timer_pid="$(tr -d ' \t\r\n' <"${SOURCE_TIMER_PID_FILE}" 2>/dev/null || true)"
+    if [ -n "${old_timer_pid}" ] && kill -0 "${old_timer_pid}" 2>/dev/null; then
+      kill -TERM "${old_timer_pid}" 2>/dev/null || true
+    fi
+  fi
+  source_timer_loop &
+  echo $! > "${SOURCE_TIMER_PID_FILE}"
 }
 
 stop_daemon() {
+  if [ -f "${SOURCE_TIMER_PID_FILE}" ]; then
+    timer_pid="$(tr -d ' \t\r\n' <"${SOURCE_TIMER_PID_FILE}" 2>/dev/null || true)"
+    if [ -n "${timer_pid}" ] && kill -0 "${timer_pid}" 2>/dev/null; then
+      kill -TERM "${timer_pid}" 2>/dev/null || true
+    fi
+    rm -f "${SOURCE_TIMER_PID_FILE}" 2>/dev/null || true
+  fi
+
   if [ -f "${PID_FILE}" ]; then
     pid="$(tr -d ' \t\r\n' <"${PID_FILE}" 2>/dev/null || true)"
     if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
