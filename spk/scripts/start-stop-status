@@ -210,22 +210,48 @@ register_default_source_meta() {
   if [ ! -x "${NODE_BIN}" ]; then
     return 0
   fi
-  META_FILE="${META_FILE}" DEFAULT_SOURCE_ID="${DEFAULT_SOURCE_ID}" DEFAULT_SOURCE_NAME="${DEFAULT_SOURCE_NAME}" "${NODE_BIN}" -e "
+  "${NODE_BIN}" -e "
 const fs = require('fs')
-const meta = process.env.META_FILE
-const id = process.env.DEFAULT_SOURCE_ID
-const name = process.env.DEFAULT_SOURCE_NAME
+const metaPath = process.argv[1]
+const scriptPath = process.argv[2]
+const id = process.argv[3]
+const name = process.argv[4]
+let original = null
 let list = []
 try {
-  if (fs.existsSync(meta)) {
-    const parsed = JSON.parse(fs.readFileSync(meta, 'utf8'))
+  if (fs.existsSync(metaPath)) {
+    original = fs.readFileSync(metaPath, 'utf8')
+    const parsed = JSON.parse(original)
     if (Array.isArray(parsed)) list = parsed
   }
 } catch {}
-const exists = list.some(i => i && i.id === id)
-if (!exists) list.push({ id, name, enabled: true, allowUnsafeVM: true })
-fs.writeFileSync(meta, JSON.stringify(list, null, 2))
-" 2>/dev/null || true
+let entry = list.find(i => i && i.id === id)
+if (!entry) {
+  list.push({ id, name, enabled: true, allowUnsafeVM: true })
+} else {
+  // 源文件头部元信息与 lxserver extractMetadata 同规则，刷新已有条目
+  let header = null
+  try {
+    if (scriptPath && fs.existsSync(scriptPath)) header = fs.readFileSync(scriptPath, 'utf8')
+  } catch {}
+  const commentMatch = header && header.match(/\/\*[*!]([\s\S]*?)\*\//)
+  if (commentMatch) {
+    const comment = commentMatch[1]
+    const pick = (re) => { const m = comment.match(re); return m ? m[1].trim() : null }
+    const fields = {
+      version: pick(/@version\s+(.+)/),
+      author: pick(/@author\s+(.+)/),
+      description: pick(/@description\s+(.+)/),
+      homepage: pick(/@(?:repository|homepage)\s+(.+)/),
+    }
+    for (const key of Object.keys(fields)) {
+      if (fields[key] !== null) entry[key] = fields[key]
+    }
+  }
+}
+const next = JSON.stringify(list, null, 2)
+if (original !== next) fs.writeFileSync(metaPath, next)
+" "${META_FILE}" "${SCRIPT_FILE}" "${DEFAULT_SOURCE_ID}" "${DEFAULT_SOURCE_NAME}" 2>/dev/null || true
   fix_source_file_permissions "${META_FILE}"
   fix_source_file_permissions "${SCRIPT_FILE}"
 }
